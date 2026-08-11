@@ -12,6 +12,7 @@ import config
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.upstox.com/v2"
+QUOTE_URL = "https://api.upstox.com/v3"
 MAX_KEYS_PER_QUOTE = 500
 
 
@@ -100,7 +101,7 @@ class UpstoxClient:
         out = {}
         for i in range(0, len(keys), MAX_KEYS_PER_QUOTE):
             chunk = keys[i : i + MAX_KEYS_PER_QUOTE]
-            url = f"{BASE_URL}/market-quote/ltp?instrument_key=" + ",".join(chunk)
+            url = f"{QUOTE_URL}/market-quote/ltp?instrument_key=" + ",".join(chunk)
             data = self._get(url).get("data", {})
             out.update(data)
         return out
@@ -108,10 +109,10 @@ class UpstoxClient:
     def ltp_for_symbols(self, symbols: list) -> dict:
         keys = [self.resolve_key(s) for s in symbols]
         quotes = self.batch_ltp(keys)
-        return {
-            sym: quotes.get(self.resolve_key(sym), {}).get("last_price")
-            for sym in symbols
-        }
+        by_symbol = {}
+        for resp_key, data in quotes.items():
+            by_symbol[resp_key.split(":")[-1].upper()] = data.get("last_price")
+        return {sym: by_symbol.get(sym.upper()) for sym in symbols}
 
     def historical_candles(
         self, key: str, days: int = config.HISTORICAL_DAYS, interval: str = "day"
@@ -132,7 +133,7 @@ class UpstoxClient:
         return self.fundamentals(isin, "key-ratios")
 
     def company_profile(self, isin: str) -> dict:
-        return self.fundamentals(isin, "company-profile")
+        return self.fundamentals(isin, "profile")
 
     def income_statement(self, isin: str) -> dict:
         return self.fundamentals(isin, "income-statement")
