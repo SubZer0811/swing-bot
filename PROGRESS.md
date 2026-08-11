@@ -58,23 +58,51 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 
 ## Implementation Plan
 
-### Phase 0 — Verify Upstox API (next step)
-- [ ] OAuth token flow on headless server (generate token locally -> paste into `.env`).
-- [ ] Refresh-token auto-renewal (access token expires in 1 day).
-- [ ] Fundamentals endpoint availability (`/v2/fundamentals/{instrument_key}`); fallback = Screener.in.
-- [ ] Rate limits + batch-quote limits (~50 instruments/call).
-- [ ] Instrument master download + ticker -> instrument key mapping.
+### Phase 0 — Verify Upstox API (DONE 2026-08-11)
+
+**Verified findings:**
+
+1. **Token flow (headless server):** Standard OAuth2 authorization code flow
+   (`/v2/login/authorization/dialog` -> code -> `/v2/login/authorization/token`).
+   No browser needed if we use the **Analytics Token**: generated once from
+   Upstox Developer Apps -> Analytics tab, **read-only, valid 1 year**, and
+   market-data APIs work **without a static IP**. This is the right choice — the
+   bot only reads market data; orders are manual AMO on the Upstox app.
+   (Account-specific APIs — User/Portfolio/Orders — require a static IP; out of
+   scope since orders are manual.)
+2. **Refresh tokens: NOT supported.** Standard access token expires at
+   **3:30 AM IST** regardless of generation time; Upstox staff confirmed no
+   refresh-token grant. Hence the Analytics token (1-year) eliminates the
+   daily-regeneration problem entirely.
+3. **Fundamentals API: EXISTS** (launched 2026-05-11). Full suite keyed by ISIN:
+   Company Profile, Balance Sheet, Cash Flow, Income Statement, Share Holdings,
+   **Key Ratios (P/E, P/B, ROA, ROE, ROCE, EV/EBITDA + sector benchmark)**,
+   Corporate Actions, Competitors. NO fallback to Screener.in needed.
+4. **Rate limits (Standard APIs incl. historical candles):** 50 req/sec,
+   500 req/min, 2000 req/30min per user. Generous for NIFTY-500 scanning.
+5. **Batch quotes:** V3 `/v3/market-quote/ltp` and `/v3/market-quote/ohlc`
+   support **up to 500 instrument keys per request** -> entire NIFTY-500
+   universe in **ONE call** (not batches of 50).
+6. **Instrument master:** JSON now preferred (CSV deprecated). URLs like
+   `https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz`,
+   refreshed ~6 AM daily. `instrument_key` = `NSE_EQ|INE...`; includes ISIN,
+   lot_size, tick_size, trading_symbol, segment/type for filtering EQ only.
+7. **Historical candles:** `GET /v2/historical-candle/{instrument_key}/day/{to_date}/{from_date}`
+   — daily data up to 1 year, single instrument per request.
+8. **Bonus:** Upstox has a native **News API** (max 30 instrument keys/request) —
+   possible future replacement for the Google News RSS scraper.
 
 ### Phase 1 — Upstox client (`upstox_client.py`)
-- [ ] Auth from `.env` (`UPSTOX_API_KEY`, `UPSTOX_ACCESS_TOKEN`/refresh), auto-refresh + retry.
-- [ ] Instrument master download + cache + `RELIANCE.NS` -> `NSE_EQ|INE002A01018` mapping.
-- [ ] `batch_quotes(instruments)` — live LTP, batches of 50.
-- [ ] `historical_candles(instrument, days=60)`.
-- [ ] Remove `yfinance`, add `requests` to requirements.
+- [ ] Auth from `.env`: `UPSTOX_API_KEY` + `UPSTOX_ANALYTICS_TOKEN` (1-year, read-only). No refresh logic needed.
+- [ ] Instrument master download (JSON, gz) + cache + ticker -> `NSE_EQ|INE...` mapping via ISIN.
+- [ ] `batch_quotes(instrument_keys)` — LTP for up to 500 keys per call.
+- [ ] `historical_candles(instrument_key, interval="day", days=60)`.
+- [ ] Fundamentals: `key_ratios(isin)`, `income_statement(isin)`, `company_profile(isin)`.
+- [ ] Remove `yfinance`, add `requests` (raw REST; avoid heavyweight SDK) to requirements.
 
 ### Phase 2 — Universe + budget filter
 - [ ] NIFTY 500 constituents (cached).
-- [ ] Batch LTP over universe -> filter by `LTP <= daily budget`.
+- [ ] Batch LTP over universe (ONE `/v3/market-quote/ltp` call) -> filter by `LTP <= daily budget`.
 - [ ] Fetch 60-day history only for affordable subset.
 
 ### Phase 3 — Analysis pipeline
@@ -105,3 +133,6 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 
 ## Changelog
 - 2026-08-11: Initial plan recorded; decisions on budget model, two-phase analysis, Upstox data source.
+- 2026-08-11: Phase 0 verified. Wins: 1-year read-only Analytics token (no daily refresh), native
+  Fundamentals API (Key Ratios/Income/Profile, ISIN-keyed), batch LTP of 500 keys/call, generous rate
+  limits. Standard access token expires 3:30 AM IST and has NO refresh grant — Analytics token avoids this.
