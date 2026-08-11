@@ -92,26 +92,36 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 8. **Bonus:** Upstox has a native **News API** (max 30 instrument keys/request) —
    possible future replacement for the Google News RSS scraper.
 
-### Phase 1 — Upstox client (`upstox_client.py`) — DONE (code, live-test pending token)
+### Phase 1 — Upstox client (`upstox_client.py`) — DONE (live-tested)
 - [x] Auth from `.env`: `UPSTOX_API_KEY` + `UPSTOX_ANALYTICS_TOKEN` (1-year, read-only). No refresh logic needed.
 - [x] Instrument master download (JSON, gz) + cache + ticker -> `NSE_EQ|INE...` mapping via ISIN.
 - [x] `batch_quotes(instrument_keys)` — LTP for up to 500 keys per call.
 - [x] `historical_candles(instrument_key, interval="day", days=60)`.
 - [x] Fundamentals: `key_ratios(isin)`, `income_statement(isin)`, `company_profile(isin)`.
 - [x] Remove `yfinance`, add `requests` (raw REST; avoid heavyweight SDK) to requirements.
-- [ ] LIVE TEST with real `UPSTOX_ANALYTICS_TOKEN` (instrument master download, batch LTP, candles, key-ratios).
+- [x] LIVE TEST (2026-08-12, real Analytics token): instrument master (2463 EQ), LTP, 500-batch,
+      62-day candles, ISIN, fundamentals all working. FIXED: V2 LTP deprecated -> V3
+      (`/v3/market-quote/ltp`, keys are `NSE_EQ:SYMBOL`); fundamentals path is
+      `/fundamentals/:isin/profile` (not `company-profile`).
 
-### Phase 2 — Universe + budget filter
-- [ ] NIFTY 500 constituents (cached).
-- [ ] Batch LTP over universe (ONE `/v3/market-quote/ltp` call) -> filter by `LTP <= daily budget`.
-- [ ] Fetch 60-day history only for affordable subset.
+### Phase 2 — Universe + budget filter — DONE (live-tested)
+- [x] NIFTY 500 constituents via NSE archives CSV (cached 7 days).
+- [x] Batch LTP over universe (ONE `/v3/market-quote/ltp` call) -> filter by `LTP <= daily budget`.
+- [x] Fetch 60-day history only for affordable subset.
+- [x] TEST: 500-stock universe, INR 2000 budget -> 387 affordable in a single call.
 
-### Phase 3 — Analysis pipeline
-- [ ] Rewrite `data_fetcher.py` onto Upstox client.
-- [ ] `technicals.py` (SMA/RSI/candlesticks).
-- [ ] Phase 1 (portfolio): technicals + fundamentals -> Gemini -> SELL/HOLD.
-- [ ] Phase 2 (BUY): technicals on affordable subset -> top-N pre-screen -> Gemini -> BUY list.
-- [ ] Daily budget setting in UI; change triggers Phase 2 recompute.
+### Phase 3 — Analysis pipeline — DONE (data layers live-tested)
+- [x] `data_fetcher.py` on Upstox client (OHLCV DataFrame).
+- [x] `technicals.py`: SMA_20/50, RSI_14, CDL_DOJI/MARUBOZU/ENGULFING. Uses pandas-ta when
+      available, else pure-pandas fallback (pandas-ta is unmaintained; PyPI 3.12-only, git
+      clone blocked locally).
+- [x] `database.py`: SQLAlchemy models (Recommendation, PortfolioHolding, WatchlistItem,
+      DailyBudget) + CRUD. Tested: budget, watchlist, holdings, save/status.
+- [x] `news_scraper.py` (Google News RSS).
+- [x] `agent.py` (Gemini 2.5 Pro + Pydantic `StockRecommendation` + chat).
+- [x] `pipeline.py`: run_daily_analysis() orchestrates Phase 1 (portfolio SELL/HOLD) + Phase 2
+      (budget-filtered BUY). Per-stock try/except.
+- [ ] LIVE TEST Gemini agent (needs real `GEMINI_API_KEY`).
 
 ### Phase 4 — UI (`app.py`)
 - [ ] Portfolio tab.
