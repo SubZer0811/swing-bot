@@ -92,13 +92,14 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 8. **Bonus:** Upstox has a native **News API** (max 30 instrument keys/request) —
    possible future replacement for the Google News RSS scraper.
 
-### Phase 1 — Upstox client (`upstox_client.py`)
-- [ ] Auth from `.env`: `UPSTOX_API_KEY` + `UPSTOX_ANALYTICS_TOKEN` (1-year, read-only). No refresh logic needed.
-- [ ] Instrument master download (JSON, gz) + cache + ticker -> `NSE_EQ|INE...` mapping via ISIN.
-- [ ] `batch_quotes(instrument_keys)` — LTP for up to 500 keys per call.
-- [ ] `historical_candles(instrument_key, interval="day", days=60)`.
-- [ ] Fundamentals: `key_ratios(isin)`, `income_statement(isin)`, `company_profile(isin)`.
-- [ ] Remove `yfinance`, add `requests` (raw REST; avoid heavyweight SDK) to requirements.
+### Phase 1 — Upstox client (`upstox_client.py`) — DONE (code, live-test pending token)
+- [x] Auth from `.env`: `UPSTOX_API_KEY` + `UPSTOX_ANALYTICS_TOKEN` (1-year, read-only). No refresh logic needed.
+- [x] Instrument master download (JSON, gz) + cache + ticker -> `NSE_EQ|INE...` mapping via ISIN.
+- [x] `batch_quotes(instrument_keys)` — LTP for up to 500 keys per call.
+- [x] `historical_candles(instrument_key, interval="day", days=60)`.
+- [x] Fundamentals: `key_ratios(isin)`, `income_statement(isin)`, `company_profile(isin)`.
+- [x] Remove `yfinance`, add `requests` (raw REST; avoid heavyweight SDK) to requirements.
+- [ ] LIVE TEST with real `UPSTOX_ANALYTICS_TOKEN` (instrument master download, batch LTP, candles, key-ratios).
 
 ### Phase 2 — Universe + budget filter
 - [ ] NIFTY 500 constituents (cached).
@@ -136,3 +137,5 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 - 2026-08-11: Phase 0 verified. Wins: 1-year read-only Analytics token (no daily refresh), native
   Fundamentals API (Key Ratios/Income/Profile, ISIN-keyed), batch LTP of 500 keys/call, generous rate
   limits. Standard access token expires 3:30 AM IST and has NO refresh grant — Analytics token avoids this.
+- 2026-08-11: Phase 1 code written (config.py, upstox_client.py, requirements.txt, .env templates).
+  Live test pending real Analytics token. NOTE: `.env` is gitignored (not committed).
