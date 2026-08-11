@@ -1,0 +1,9 @@
+streamlit
+pandas-ta
+feedparser
+google-genai
+pydantic
+sqlalchemy
+apscheduler
+python-dotenv
+requests
