@@ -18,12 +18,13 @@ UPSTOX_ANALYTICS_TOKEN = os.getenv("UPSTOX_ANALYTICS_TOKEN", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
-GEMINI_MODEL = "gemini-2.5-pro"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 
 INSTRUMENT_MASTER_URL = (
     "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 )
 HISTORICAL_DAYS = 60
+PHASE2_TOP_N = 10
 
 WATCHLIST = [
     "RELIANCE",

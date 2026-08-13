@@ -9,6 +9,8 @@ from agent import GeminiAgent
 from data_fetcher import get_historical_data
 from upstox_client import UpstoxClient, UpstoxError
 
+import config
+
 log = logging.getLogger(__name__)
 
 
@@ -61,6 +63,31 @@ def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list) -> lis
     return recs
 
 
+def _tech_score(tech: dict) -> float:
+    score = 0.0
+    trend = tech.get("trend")
+    if trend == "Uptrend":
+        score += 3
+    elif trend == "Downtrend":
+        score -= 2
+    rsi = tech.get("rsi_14")
+    if rsi is not None:
+        if 55 <= rsi <= 70:
+            score += 2
+        elif rsi > 75:
+            score -= 2
+        elif rsi < 35:
+            score -= 1
+    eng = tech.get("engulfing")
+    if eng == "Bullish":
+        score += 2
+    elif eng == "Bearish":
+        score -= 2
+    mom = tech.get("5d_momentum_pct") or 0
+    score += max(-2, min(2, mom / 2))
+    return score
+
+
 def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float) -> list:
     if budget <= 0:
         log.info("Phase 2: budget is 0, no BUY analysis")
@@ -76,18 +103,29 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float) -> list
         log.exception("Failed to filter universe by budget: %s", exc)
         return []
     log.info("Phase 2: %d stocks affordable within INR %.0f", len(affordable), budget)
-    recs = []
+
+    scored = []
     for item in affordable:
         symbol = item["symbol"]
         try:
             technical = _technical_analysis(client, symbol)
-            if not technical:
-                continue
+            if technical:
+                scored.append({"symbol": symbol, "ltp": technical.get("close") or item["ltp"], "tech": technical})
+        except Exception as exc:
+            log.warning("Technicals failed for %s: %s", symbol, exc)
+    scored.sort(key=lambda x: _tech_score(x["tech"]), reverse=True)
+    shortlist = scored[: config.PHASE2_TOP_N]
+    log.info("Phase 2: shortlisted top %d by technical score", len(shortlist))
+
+    recs = []
+    for item in shortlist:
+        symbol = item["symbol"]
+        ltp = item["ltp"]
+        try:
             news = news_scraper.get_recent_news(symbol)
-            ltp = technical.get("close") or item["ltp"]
             qty = int(budget // ltp) if ltp else 0
             result = agent.analyze_stock(
-                symbol, technical, news, budget=budget, holding_context=None
+                symbol, item["tech"], news, budget=budget, holding_context=None
             )
             recs.append(
                 {

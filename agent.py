@@ -1,8 +1,10 @@
 import logging
+import time
 from typing import Optional
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from pydantic import BaseModel, Field
 
 import config
@@ -38,19 +40,30 @@ class GeminiAgent:
         self.model = config.GEMINI_MODEL
 
     def _generate(self, content: str, schema) -> StockRecommendation:
-        resp = self.client.models.generate_content(
-            model=self.model,
-            contents=content,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_schema=schema,
-                temperature=0.2,
-            ),
-        )
-        parsed = resp.parsed
-        if parsed is None:
-            raise ValueError(f"Gemini returned no parsed object: {resp.text}")
-        return parsed
+        for attempt in range(5):
+            try:
+                resp = self.client.models.generate_content(
+                    model=self.model,
+                    contents=content,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        response_schema=schema,
+                        temperature=0.2,
+                    ),
+                )
+                parsed = resp.parsed
+                if parsed is None:
+                    raise ValueError(f"Gemini returned no parsed object: {resp.text}")
+                return parsed
+            except ClientError as exc:
+                message = str(exc)
+                if "429" in message or getattr(exc, "status_code", None) == 429:
+                    delay = min(60, 15 * (attempt + 1))
+                    log.warning("Gemini quota exhausted, retrying in %ss", delay)
+                    time.sleep(delay)
+                    continue
+                raise
+        raise RuntimeError("Gemini quota retries exhausted")
 
     def analyze_stock(
         self,

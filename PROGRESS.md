@@ -121,8 +121,18 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 - [x] `agent.py` (Gemini 2.5 Pro + Pydantic `StockRecommendation` + chat).
 - [x] `pipeline.py`: run_daily_analysis() orchestrates Phase 1 (portfolio SELL/HOLD) + Phase 2
       (budget-filtered BUY). Per-stock try/except.
-- [ ] LIVE TEST Gemini agent (needs real `GEMINI_API_KEY`).
-
+- [x] `pipeline.py`: run_daily_analysis() orchestrates Phase 1 (portfolio SELL/HOLD) + Phase 2
+      (budget-filtered BUY). Per-stock try/except.
+- [x] LIVE TEST Gemini (2026-08-13): full stack works (Upstox -> technicals -> news -> Gemini ->
+      Pydantic). KEY FINDINGS:
+      * `gemini-2.5-pro` is RETIRED for new accounts (404). Using `gemini-3.5-flash`
+        (configurable via `GEMINI_MODEL` env). `gemini-3.1-pro-preview` available but quota-gated.
+      * FREE TIER LIMIT: 20 generate_content requests/day on gemini-3.5-flash. Our pipeline needs
+        ~10 (Phase 2 top-N) + portfolio (Phase 1) per run — fits, but no headroom. Upgrade to paid
+        tier for production.
+      * Added top-N pre-screen (PHASE2_TOP_N=10) since cheap technicals on the full affordable set
+        is fine but Gemini must only see the shortlist. Ranked by Uptrend/RSI/engulfing/momentum.
+      * Added 429 quota backoff/retry in GeminiAgent._generate.
 ### Phase 4 — UI (`app.py`)
 - [ ] Portfolio tab.
 - [ ] Watchlist tab.
