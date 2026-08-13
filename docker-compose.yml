@@ -1,0 +1,27 @@
+services:
+  swing-bot:
+    build: .
+    container_name: swing_trading_bot
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./data:/app/data
+    tz: "Asia/Kolkata"
+
+  auto-deploy:
+    image: almir/webhook
+    container_name: swing_bot_webhook
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -verbose -hooks=/app/hooks.json -hotreload
