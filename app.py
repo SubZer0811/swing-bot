@@ -107,6 +107,53 @@ def _show_run_status() -> None:
             )
 
 
+def _render_analysis_log() -> None:
+    st.header("Analysis Log")
+    runs = db.get_recent_runs(limit=10)
+    if not runs:
+        st.info("No analysis runs yet. Run an analysis to see the shortlist and reasoning.")
+        return
+    for run in runs:
+        try:
+            shortlist = json.loads(run.shortlist or "[]")
+            errors = json.loads(run.errors or "[]")
+        except Exception:
+            shortlist, errors = [], []
+        with st.expander(
+            f"Run #{run.id} · {run.started_at:%Y-%m-%d %H:%M} · "
+            f"budget ₹{run.budget:,.0f} · {run.status}"
+        ):
+            st.write(
+                f"Phase 1 (portfolio): **{run.phase1_count}** · "
+                f"Phase 2 (BUY): **{run.phase2_count}**"
+            )
+            if shortlist:
+                st.write("**Phase 2 shortlist (top by technical score):**")
+                rows = []
+                for item in shortlist:
+                    rows.append(
+                        {
+                            "Symbol": item.get("symbol"),
+                            "Score": item.get("score"),
+                            "Trend": item.get("trend"),
+                            "RSI": item.get("rsi"),
+                            "Engulfing": item.get("engulfing"),
+                            "Marubozu": item.get("marubozu"),
+                            "Doji": item.get("doji"),
+                            "LTP": item.get("ltp"),
+                        }
+                    )
+                st.dataframe(
+                    pd.DataFrame(rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            if errors:
+                st.write("**Issues encountered:**")
+                for err in errors:
+                    st.warning(err)
+
+
 def _render_today() -> None:
     st.header("Daily Recommendations (Today)")
     recs = db.get_today_recommendations()
@@ -283,8 +330,8 @@ def main() -> None:
 
     start_scheduler()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["Recommendations", "Budget", "Portfolio", "Watchlist", "Ask Gemini"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["Recommendations", "Budget", "Portfolio", "Watchlist", "Analysis Log", "Ask Gemini"]
     )
     with tab1:
         col_a, col_b = st.columns([4, 1])
@@ -301,6 +348,8 @@ def main() -> None:
     with tab4:
         _render_watchlist()
     with tab5:
+        _render_analysis_log()
+    with tab6:
         _render_chat()
 
 
