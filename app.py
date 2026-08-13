@@ -6,10 +6,34 @@ import streamlit as st
 
 import database as db
 import pipeline
-from agent import GeminiAgent
+from agent import GeminiAgent, QuotaExceededError
 
 logging.basicConfig(level=logging.INFO)
 db.init_db()
+
+st.set_page_config(
+    page_title="Swing Trading Bot",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+    menu_items=None,
+)
+
+HIDE_CHROME = """
+<style>
+    #MainMenu {visibility: hidden;}
+    header[data-testid="stHeader"] {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    [data-testid="stAppDeployButton"] {visibility: hidden;}
+    .block-container {padding-top: 1rem; padding-bottom: 1rem;}
+    @media (max-width: 768px) {
+        .block-container {padding-left: 0.5rem; padding-right: 0.5rem;}
+    }
+    div[data-testid="stExpander"] details summary p {font-size: 1rem;}
+</style>
+"""
+st.markdown(HIDE_CHROME, unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -40,6 +64,36 @@ def _recommendation_df(recs) -> pd.DataFrame:
         for r in recs
     ]
     return pd.DataFrame(rows)
+
+
+def _run_and_report() -> None:
+    st.session_state.run_report = None
+    with st.spinner("Running two-phase analysis (can take a few minutes)..."):
+        try:
+            result = pipeline.run_daily_analysis()
+            st.session_state.run_report = result
+        except QuotaExceededError as exc:
+            st.session_state.run_report = {"errors": [str(exc)]}
+        except Exception as exc:
+            st.session_state.run_report = {"errors": [f"Analysis failed: {exc}"]}
+
+
+def _show_run_report() -> None:
+    report = st.session_state.get("run_report")
+    if not report:
+        return
+    errors = report.get("errors", [])
+    if errors:
+        for err in errors:
+            if "quota" in err.lower():
+                st.error(err)
+            else:
+                st.warning(err)
+    else:
+        st.success(
+            f"Done. {report.get('phase1_count', 0)} portfolio + "
+            f"{report.get('phase2_count', 0)} BUY recommendations generated."
+        )
 
 
 def _render_today() -> None:
@@ -114,9 +168,7 @@ def _render_budget() -> None:
     )
     if st.button("Update Budget & Recompute BUY Analysis"):
         db.set_budget(new_budget)
-        st.success(f"Budget set to ₹{new_budget:,.2f}. Running analysis...")
-        with st.spinner("Running two-phase analysis (this can take a few minutes)..."):
-            pipeline.run_daily_analysis()
+        _run_and_report()
         st.rerun()
 
 
@@ -203,6 +255,8 @@ def _render_chat() -> None:
             st.session_state.chat_history.append(("assistant", answer))
             with st.chat_message("assistant"):
                 st.write(answer)
+        except QuotaExceededError as exc:
+            st.error(str(exc))
         except Exception as exc:
             st.error(f"Gemini chat failed: {exc}")
 
@@ -214,20 +268,21 @@ def config_defaults():
 
 
 def main() -> None:
-    st.set_page_config(page_title="Swing Trading Bot", layout="wide")
-    st.title("Swing Trading Bot — NSE")
+    st.title("Swing Trading Bot")
+    st.caption("NSE (NIFTY 500 universe) · weekday EOD analysis at 3:45 PM IST · budget-aware")
+
     start_scheduler()
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["Daily Recommendations", "Budget", "Portfolio", "Watchlist", "Ask Gemini"]
+        ["Recommendations", "Budget", "Portfolio", "Watchlist", "Ask Gemini"]
     )
     with tab1:
         col_a, col_b = st.columns([4, 1])
         with col_b:
             if st.button("Run Analysis Now"):
-                with st.spinner("Running two-phase analysis..."):
-                    pipeline.run_daily_analysis()
+                _run_and_report()
                 st.rerun()
+        _show_run_report()
         _render_today()
     with tab2:
         _render_budget()

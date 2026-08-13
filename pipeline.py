@@ -5,7 +5,7 @@ import database as db
 import news_scraper
 import technicals
 import universe
-from agent import GeminiAgent
+from agent import GeminiAgent, QuotaExceededError
 from data_fetcher import get_historical_data
 from upstox_client import UpstoxClient, UpstoxError
 
@@ -19,7 +19,7 @@ def _technical_analysis(client: UpstoxClient, symbol: str) -> dict:
     return technicals.summarize(df)
 
 
-def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list) -> list:
+def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors: list) -> list:
     recs = []
     if not holdings:
         log.info("Phase 1: no holdings to analyze")
@@ -58,7 +58,11 @@ def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list) -> lis
                     "rationale": result.rationale,
                 }
             )
+        except QuotaExceededError as exc:
+            errors.append(f"Gemini quota exceeded during Phase 1 ({symbol}): {exc}")
+            return recs
         except Exception as exc:
+            errors.append(f"Phase 1 failed for {symbol}: {exc}")
             log.exception("Phase 1 failed for %s: %s", symbol, exc)
     return recs
 
@@ -88,18 +92,20 @@ def _tech_score(tech: dict) -> float:
     return score
 
 
-def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float) -> list:
+def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors: list) -> list:
     if budget <= 0:
         log.info("Phase 2: budget is 0, no BUY analysis")
         return []
     try:
         universe_symbols = universe.get_nifty500()
     except Exception as exc:
+        errors.append(f"Failed to load universe: {exc}")
         log.exception("Failed to load universe: %s", exc)
         return []
     try:
         affordable = universe.filter_by_budget(client, universe_symbols, budget)
     except Exception as exc:
+        errors.append(f"Failed to filter universe by budget: {exc}")
         log.exception("Failed to filter universe by budget: %s", exc)
         return []
     log.info("Phase 2: %d stocks affordable within INR %.0f", len(affordable), budget)
@@ -140,7 +146,11 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float) -> list
                     "rationale": result.rationale,
                 }
             )
+        except QuotaExceededError as exc:
+            errors.append(f"Gemini quota exceeded during Phase 2 ({symbol}): {exc}")
+            return recs
         except Exception as exc:
+            errors.append(f"Phase 2 failed for {symbol}: {exc}")
             log.exception("Phase 2 failed for %s: %s", symbol, exc)
     return recs
 
@@ -153,9 +163,10 @@ def run_daily_analysis() -> dict:
 
     holdings = db.get_holdings()
     budget = db.get_budget()
+    errors = []
 
-    phase1 = _run_phase1(client, agent, holdings)
-    phase2 = _run_phase2(client, agent, budget)
+    phase1 = _run_phase1(client, agent, holdings, errors)
+    phase2 = _run_phase2(client, agent, budget, errors)
 
     all_recs = phase1 + phase2
     if all_recs:
@@ -170,4 +181,5 @@ def run_daily_analysis() -> dict:
         "phase2_count": len(phase2),
         "budget": budget,
         "holdings_count": len(holdings),
+        "errors": errors,
     }

@@ -12,6 +12,10 @@ import config
 log = logging.getLogger(__name__)
 
 
+class QuotaExceededError(RuntimeError):
+    pass
+
+
 class StockRecommendation(BaseModel):
     ticker: str
     action: str = Field(description='"BUY", "SELL", or "HOLD"')
@@ -58,12 +62,17 @@ class GeminiAgent:
             except ClientError as exc:
                 message = str(exc)
                 if "429" in message or getattr(exc, "status_code", None) == 429:
+                    if attempt == 4:
+                        raise QuotaExceededError(
+                            "Gemini daily quota exceeded (free tier ~20 calls/day). "
+                            "Add a GEMINI_API_KEY on a paid plan or retry tomorrow."
+                        )
                     delay = min(60, 15 * (attempt + 1))
                     log.warning("Gemini quota exhausted, retrying in %ss", delay)
                     time.sleep(delay)
                     continue
                 raise
-        raise RuntimeError("Gemini quota retries exhausted")
+        raise QuotaExceededError("Gemini quota retries exhausted")
 
     def analyze_stock(
         self,
