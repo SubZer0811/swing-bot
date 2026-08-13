@@ -1,6 +1,7 @@
+import json
 import logging
-from datetime import date
-from sqlalchemy import create_engine, Column, Integer, String, Date, Float, Text
+from datetime import date, datetime
+from sqlalchemy import create_engine, Column, Integer, String, Date, Float, Text, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 import config
@@ -54,6 +55,20 @@ class DailyBudget(Base):
     id = Column(Integer, primary_key=True)
     date = Column(Date, index=True, default=date.today)
     amount = Column(Float, default=0.0)
+
+
+class AnalysisRun(Base):
+    __tablename__ = "analysis_runs"
+
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String, default="Running")
+    budget = Column(Float, default=0.0)
+    phase1_count = Column(Integer, default=0)
+    phase2_count = Column(Integer, default=0)
+    shortlist = Column(Text, default="[]")
+    errors = Column(Text, default="[]")
 
 
 def init_db() -> None:
@@ -158,3 +173,44 @@ def set_budget(amount: float) -> None:
     with _session() as session:
         session.add(DailyBudget(date=date.today(), amount=amount))
         session.commit()
+
+
+def create_analysis_run(budget: float) -> int:
+    with _session() as session:
+        run = AnalysisRun(status="Running", budget=budget)
+        session.add(run)
+        session.commit()
+        return run.id
+
+
+def complete_analysis_run(run_id: int, phase1: int, phase2: int,
+                          shortlist: list, errors: list) -> None:
+    with _session() as session:
+        run = session.query(AnalysisRun).get(run_id)
+        if run:
+            run.finished_at = datetime.utcnow()
+            run.status = "Completed" if not errors else "Completed (with errors)"
+            run.phase1_count = phase1
+            run.phase2_count = phase2
+            run.shortlist = json.dumps(shortlist)
+            run.errors = json.dumps(errors)
+            session.commit()
+
+
+def get_last_run():
+    with _session() as session:
+        return (
+            session.query(AnalysisRun)
+            .order_by(AnalysisRun.id.desc())
+            .first()
+        )
+
+
+def get_recent_runs(limit: int = 10):
+    with _session() as session:
+        return (
+            session.query(AnalysisRun)
+            .order_by(AnalysisRun.id.desc())
+            .limit(limit)
+            .all()
+        )

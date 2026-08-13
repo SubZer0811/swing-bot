@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import date
 
@@ -66,34 +67,44 @@ def _recommendation_df(recs) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _run_and_report() -> None:
-    st.session_state.run_report = None
-    with st.spinner("Running two-phase analysis (can take a few minutes)..."):
-        try:
-            result = pipeline.run_daily_analysis()
-            st.session_state.run_report = result
-        except QuotaExceededError as exc:
-            st.session_state.run_report = {"errors": [str(exc)]}
-        except Exception as exc:
-            st.session_state.run_report = {"errors": [f"Analysis failed: {exc}"]}
+def _run_and_report() -> bool:
+    if pipeline.is_running():
+        st.warning("An analysis is already running. This click was ignored.")
+        return False
+    started = pipeline.start_async_analysis()
+    if not started:
+        st.warning("An analysis is already running. This click was ignored.")
+        return False
+    st.success("Analysis started in the background. You can close this page; it will keep running.")
+    return True
 
 
-def _show_run_report() -> None:
-    report = st.session_state.get("run_report")
-    if not report:
+def _show_run_status() -> None:
+    last = db.get_last_run()
+    if not last:
         return
-    errors = report.get("errors", [])
-    if errors:
-        for err in errors:
-            if "quota" in err.lower():
-                st.error(err)
-            else:
-                st.warning(err)
-    else:
-        st.success(
-            f"Done. {report.get('phase1_count', 0)} portfolio + "
-            f"{report.get('phase2_count', 0)} BUY recommendations generated."
+    if last.status == "Running":
+        st.info(
+            f"An analysis run is currently in progress (started {last.started_at:%H:%M}). "
+            "Refresh this page to see the latest results."
         )
+    else:
+        errors = last.errors or "[]"
+        try:
+            err_list = json.loads(errors)
+        except Exception:
+            err_list = []
+        if err_list:
+            for err in err_list:
+                if "quota" in err.lower():
+                    st.error(err)
+                else:
+                    st.warning(err)
+        else:
+            st.success(
+                f"Last run ({last.started_at:%H:%M}) → {last.phase1_count} portfolio + "
+                f"{last.phase2_count} BUY recommendations."
+            )
 
 
 def _render_today() -> None:
@@ -170,7 +181,6 @@ def _render_budget() -> None:
         db.set_budget(new_budget)
         _run_and_report()
         st.rerun()
-
 
 def _render_portfolio() -> None:
     st.header("Portfolio")
@@ -282,7 +292,7 @@ def main() -> None:
             if st.button("Run Analysis Now"):
                 _run_and_report()
                 st.rerun()
-        _show_run_report()
+        _show_run_status()
         _render_today()
     with tab2:
         _render_budget()
