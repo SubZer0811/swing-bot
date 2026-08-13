@@ -133,18 +133,26 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
       * Added top-N pre-screen (PHASE2_TOP_N=10) since cheap technicals on the full affordable set
         is fine but Gemini must only see the shortlist. Ranked by Uptrend/RSI/engulfing/momentum.
       * Added 429 quota backoff/retry in GeminiAgent._generate.
-### Phase 4 — UI (`app.py`)
-- [ ] Portfolio tab.
-- [ ] Watchlist tab.
-- [ ] BUY recommendations w/ affordability badges.
-- [ ] Budget input + recompute trigger.
-- [ ] History & performance tab.
-- [ ] Ask Gemini chat tab.
+### Phase 4 — UI (`app.py`) — DONE (boots, serves health 200)
+- [x] Daily Recommendations tab (metrics, expandable cards, Executed/Rejected buttons).
+- [x] Budget tab (set daily budget -> triggers Phase 2 recompute).
+- [x] Portfolio tab (add/remove holdings).
+- [x] Watchlist tab (add/remove, seeded from config).
+- [x] Ask Gemini chat tab (grounded in today's recs).
+- [x] Scheduler auto-start via @st.cache_resource; Run Analysis Now button.
 
-### Phase 5 — Scheduler, Docker, deployment
-- [ ] `scheduler.py` (weekdays 15:45 IST).
-- [ ] Dockerfile, docker-compose.yml, deploy.sh, hooks.json.
-- [ ] DEPLOYMENT_GUIDE.md (TrueNAS Scale 25.04 + Tailscale).
+### Phase 5 — Scheduler, Docker, deployment — DONE
+- [x] `scheduler.py` (APScheduler, weekdays 15:45 Asia/Kolkata; start/stop verified).
+- [x] Dockerfile, docker-compose.yml, deploy.sh, hooks.json (webhook reads WEBHOOK_SECRET from env).
+- [x] DEPLOYMENT_GUIDE.md (TrueNAS Scale 25.04 + Tailscale, step-by-step).
+
+## Remaining / known limitations
+- Gemini free tier ~20 calls/day -> fits daily run (Phase 2 top-10 + portfolio), paid tier recommended.
+- Portfolio fundamentals fed to Gemini only via holding context; raw key-ratios/income fetched but not
+  yet embedded in the prompt (pipeline uses technicals+news+budget; fundamentals available in
+  upstox_client if needed).
+- No live smoke test of full run_daily_analysis end-to-end with Gemini after the top-N change
+  (quota exhausted during testing on 2026-08-13). Pre-screen verified standalone.
 
 ## Files to create (from original spec)
 - app.py, scheduler.py, data_fetcher.py, technicals.py, news_scraper.py, agent.py,
