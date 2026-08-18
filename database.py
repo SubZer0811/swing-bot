@@ -71,6 +71,18 @@ class AnalysisRun(Base):
     errors = Column(Text, default="[]")
 
 
+class AnalysisDetail(Base):
+    __tablename__ = "analysis_details"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, index=True)
+    phase = Column(Integer, default=0)
+    symbol = Column(String, default="")
+    step = Column(String, default="")
+    detail = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
 
@@ -212,5 +224,25 @@ def get_recent_runs(limit: int = 10):
             session.query(AnalysisRun)
             .order_by(AnalysisRun.id.desc())
             .limit(limit)
+            .all()
+        )
+
+
+def add_analysis_detail(run_id: int, phase: int, symbol: str, step: str, detail: str) -> None:
+    with _session() as session:
+        session.add(
+            AnalysisDetail(
+                run_id=run_id, phase=phase, symbol=symbol, step=step, detail=detail
+            )
+        )
+        session.commit()
+
+
+def get_run_details(run_id: int) -> list:
+    with _session() as session:
+        return (
+            session.query(AnalysisDetail)
+            .filter(AnalysisDetail.run_id == run_id)
+            .order_by(AnalysisDetail.id.asc())
             .all()
         )

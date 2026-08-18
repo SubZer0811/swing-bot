@@ -107,6 +107,63 @@ def _show_run_status() -> None:
             )
 
 
+STEP_LABELS = {
+    "phase": "Phase status",
+    "universe": "Universe (NIFTY 500 + watchlist)",
+    "affordable": "Affordable stocks (LTP within budget)",
+    "scored": "All scored stocks (technical rank)",
+    "shortlist": "Shortlist (top-N, sent to Gemini)",
+    "technicals": "Technicals (latest bar)",
+    "news": "News headlines",
+    "fundamentals": "Fundamentals (Upstox)",
+    "prompt": "Prompt sent to Gemini",
+    "response": "Raw Gemini response",
+    "result": "Stored recommendation",
+    "error": "Error",
+    "skipped": "Skipped",
+}
+
+
+def _render_stock_detail(ev) -> None:
+    label = STEP_LABELS.get(ev.step, ev.step)
+    st.markdown(f"**{label}**")
+    if ev.step == "error":
+        st.warning(ev.detail)
+    elif ev.step == "phase":
+        st.markdown(ev.detail)
+    elif ev.step == "skipped":
+        st.info(ev.detail)
+    elif ev.step in ("result", "response", "technicals"):
+        try:
+            st.json(json.loads(ev.detail))
+        except Exception:
+            st.code(ev.detail)
+    else:
+        st.code(ev.detail)
+
+
+def _render_run_event(ev) -> None:
+    label = STEP_LABELS.get(ev.step, ev.step)
+    if ev.step == "phase":
+        st.markdown(ev.detail)
+    elif ev.step == "error":
+        st.warning(ev.detail)
+    elif ev.step in ("universe", "affordable", "scored"):
+        width = len(ev.detail.splitlines())
+        with st.expander(f"{label} · {width} line{'s' if width != 1 else ''}"):
+            try:
+                payload = json.loads(ev.detail)
+                st.json(payload)
+            except Exception:
+                st.code(ev.detail)
+    else:
+        with st.expander(label):
+            try:
+                st.json(json.loads(ev.detail))
+            except Exception:
+                st.code(ev.detail)
+
+
 def _render_analysis_log() -> None:
     st.header("Analysis Log")
     runs = db.get_recent_runs(limit=10)
@@ -114,44 +171,37 @@ def _render_analysis_log() -> None:
         st.info("No analysis runs yet. Run an analysis to see the shortlist and reasoning.")
         return
     for run in runs:
-        try:
-            shortlist = json.loads(run.shortlist or "[]")
-            errors = json.loads(run.errors or "[]")
-        except Exception:
-            shortlist, errors = [], []
+        details = db.get_run_details(run.id)
         with st.expander(
             f"Run #{run.id} · {run.started_at:%Y-%m-%d %H:%M} · "
             f"budget ₹{run.budget:,.0f} · {run.status}"
         ):
             st.write(
                 f"Phase 1 (portfolio): **{run.phase1_count}** · "
-                f"Phase 2 (BUY): **{run.phase2_count}**"
+                f"Phase 2 (BUY): **{run.phase2_count}** · logged events: **{len(details)}**"
             )
-            if shortlist:
-                st.write("**Phase 2 shortlist (top by technical score):**")
-                rows = []
-                for item in shortlist:
-                    rows.append(
-                        {
-                            "Symbol": item.get("symbol"),
-                            "Score": item.get("score"),
-                            "Trend": item.get("trend"),
-                            "RSI": item.get("rsi"),
-                            "Engulfing": item.get("engulfing"),
-                            "Marubozu": item.get("marubozu"),
-                            "Doji": item.get("doji"),
-                            "LTP": item.get("ltp"),
-                        }
-                    )
-                st.dataframe(
-                    pd.DataFrame(rows),
-                    use_container_width=True,
-                    hide_index=True,
+            if not details:
+                st.info("No detail records for this run.")
+                continue
+            for phase in (1, 2):
+                phase_events = [d for d in details if d.phase == phase]
+                if not phase_events:
+                    continue
+                st.subheader(
+                    "Phase 1 — Portfolio (SELL/HOLD)" if phase == 1 else "Phase 2 — New BUYs"
                 )
-            if errors:
-                st.write("**Issues encountered:**")
-                for err in errors:
-                    st.warning(err)
+                for ev in phase_events:
+                    if not ev.symbol:
+                        _render_run_event(ev)
+                stock_symbols = []
+                for ev in phase_events:
+                    if ev.symbol and ev.symbol not in stock_symbols:
+                        stock_symbols.append(ev.symbol)
+                for symbol in stock_symbols:
+                    with st.expander(f"Analysis: {symbol}"):
+                        for ev in phase_events:
+                            if ev.symbol == symbol:
+                                _render_stock_detail(ev)
 
 
 def _render_today() -> None:

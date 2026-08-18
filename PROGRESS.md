@@ -148,9 +148,6 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
 
 ## Remaining / known limitations
 - Gemini free tier ~20 calls/day -> fits daily run (Phase 2 top-10 + portfolio), paid tier recommended.
-- Portfolio fundamentals fed to Gemini only via holding context; raw key-ratios/income fetched but not
-  yet embedded in the prompt (pipeline uses technicals+news+budget; fundamentals available in
-  upstox_client if needed).
 - No live smoke test of full run_daily_analysis end-to-end with Gemini after the top-N change
   (quota exhausted during testing on 2026-08-13). Pre-screen verified standalone.
 
@@ -167,3 +164,8 @@ Streamlit WebUI deployed via Docker Compose on TrueNAS Scale, accessed via Tails
   limits. Standard access token expires 3:30 AM IST and has NO refresh grant — Analytics token avoids this.
 - 2026-08-11: Phase 1 code written (config.py, upstox_client.py, requirements.txt, .env templates).
   Live test pending real Analytics token. NOTE: `.env` is gitignored (not committed).
+
+- 2026-08-13: Dev workflow change: docker-compose swing-bot now bind-mounts ./:/app (no image rebuild needed for code edits; container restart picks up changes). Demo Analysis Run (id=1) deleted from DB.
+- 2026-08-18: Switched default model to `gemini-3.6-flash`; removed temperature, added `thinking_level=high` for max reasoning (Gemini 3 guidance). Wired Upstox fundamentals (key-ratios + income-statement) into both Phase 1 and Phase 2 Gemini prompts via `_fundamentals_summary` (resolves prior limitation).
+- 2026-08-18: Full run logging. New `analysis_details` table records per-run, per-stock events (phase, universe, affordable list, scored ranking, shortlist, technicals, news, fundamentals, exact prompt sent, raw Gemini response, stored result, errors). Analysis Log tab renders everything. `run_daily_analysis()` now auto-creates an `AnalysisRun` when invoked by the scheduler (was missing run records for scheduled jobs). Fixed bug where budget=0 crashed `_run_phase2` (returned `[]` instead of `([], [])`).
+- 2026-08-18: END-TO-END SMOKE TEST PASSED (budget INR 2000): universe 501 (389 affordable), top-10 shortlist, gemini-3.6-flash + thinking high returned 7/10 valid BUY recs, fundamentals+logging verified. 3 stocks hit transient 503 "model high demand" — root cause: Google `ServerError` is NOT a `ClientError` subclass, so the 429-only retry never fired. FIXED: agent now retries both 429 (quota) and 503 (busy) with backoff, reading status from `.code`/`.status_code`. Verified 200 OK path post-fix.

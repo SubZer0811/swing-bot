@@ -1,10 +1,10 @@
 import logging
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError
 from pydantic import BaseModel, Field
 
 import config
@@ -28,8 +28,8 @@ class StockRecommendation(BaseModel):
 
 SYSTEM_PROMPT = """
 You are a swing trading analyst for the Indian stock market (NSE).
-Analyze technical indicators, candlestick patterns, news sentiment, and
-gap-up / gap-down open risk for a 5-10 day holding period.
+Analyze technical indicators, candlestick patterns, fundamental metrics, news
+sentiment, and gap-up / gap-down open risk for a 5-10 day holding period.
 
 Return a strict JSON object matching the schema. For BUY, quantity is the
 number of shares that fit within the available budget (floor of
@@ -52,16 +52,19 @@ class GeminiAgent:
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         response_schema=schema,
-                        temperature=0.2,
+                        thinking_config=types.ThinkingConfig(thinking_level="high"),
                     ),
                 )
                 parsed = resp.parsed
                 if parsed is None:
                     raise ValueError(f"Gemini returned no parsed object: {resp.text}")
                 return parsed
-            except ClientError as exc:
+            except (ClientError, ServerError) as exc:
                 message = str(exc)
-                if "429" in message or getattr(exc, "status_code", None) == 429:
+                code = getattr(exc, "status_code", None)
+                if code is None:
+                    code = getattr(exc, "code", None)
+                if code == 429 or "429" in message:
                     if attempt == 4:
                         raise QuotaExceededError(
                             "Gemini daily quota exceeded (free tier ~20 calls/day). "
@@ -69,9 +72,17 @@ class GeminiAgent:
                         )
                     delay = min(60, 15 * (attempt + 1))
                     log.warning("Gemini quota exhausted, retrying in %ss", delay)
-                    time.sleep(delay)
-                    continue
-                raise
+                elif code == 503 or "UNAVAILABLE" in message:
+                    if attempt == 4:
+                        raise RuntimeError(
+                            f"Gemini model unavailable after retries for {self.model}: {message}"
+                        )
+                    delay = min(60, 15 * (attempt + 1))
+                    log.warning("Gemini model busy (503), retrying in %ss", delay)
+                else:
+                    raise
+                time.sleep(delay)
+                continue
         raise QuotaExceededError("Gemini quota retries exhausted")
 
     def analyze_stock(
@@ -81,6 +92,8 @@ class GeminiAgent:
         news: str,
         budget: float = 0.0,
         holding_context: Optional[dict] = None,
+        fundamentals: str = "",
+        on_log: Optional[Callable[[str, str], None]] = None,
     ) -> StockRecommendation:
         context_lines = []
         if holding_context:
@@ -92,10 +105,18 @@ class GeminiAgent:
         context_lines.append(f"Available budget: INR {budget}")
         context_lines.append("Technicals (latest bar):")
         context_lines.append(str(technicals))
+        if fundamentals:
+            context_lines.append("Fundamentals:")
+            context_lines.append(fundamentals)
         context_lines.append("Recent news:")
         context_lines.append(news)
         content = "\n".join(context_lines)
-        return self._generate(content, StockRecommendation)
+        if on_log:
+            on_log("prompt", content)
+        result = self._generate(content, StockRecommendation)
+        if on_log:
+            on_log("response", result.model_dump_json())
+        return result
 
     def chat(self, question: str, context: str) -> str:
         prompt = (
@@ -105,5 +126,11 @@ class GeminiAgent:
             + "\n\nQUESTION:\n"
             + question
         )
-        resp = self.client.models.generate_content(model=self.model, contents=prompt)
+        resp = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(thinking_level="high"),
+            ),
+        )
         return resp.text or ""

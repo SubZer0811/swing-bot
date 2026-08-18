@@ -73,7 +73,7 @@ UPSTOX_ANALYTICS_TOKEN=YOUR_REAL_ANALYTICS_TOKEN
 
 # Gemini
 GEMINI_API_KEY=YOUR_REAL_GEMINI_KEY
-GEMINI_MODEL=gemini-3.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 
 # Webhook
 WEBHOOK_SECRET=YOUR_LONG_RANDOM_SECRET
@@ -91,7 +91,7 @@ WEBHOOK_SECRET=YOUR_LONG_RANDOM_SECRET
 ### Where to get the Gemini key
 
 1. Go to https://aistudio.google.com/apikey and create a key.
-2. Free tier allows ~20 `generate_content` calls/day on `gemini-3.5-flash`. For production
+2. Free tier allows ~20 `generate_content` calls/day on `gemini-3.6-flash`. For production
    (portfolio + top-10 BUY analysis daily), a **paid tier is recommended**.
 
 ---
@@ -177,7 +177,7 @@ docker compose up -d swing-bot
 | Symptom | Likely cause / fix |
 |---|---|
 | `401` from Upstox | Analytics token wrong/expired. Regenerate in Developer Apps → Analytics. |
-| `404 This model ... no longer available` | Model retired. Set `GEMINI_MODEL=gemini-3.5-flash` (or newer) in `.env`. |
+| `404 This model ... no longer available` | Model retired. Set `GEMINI_MODEL=gemini-3.6-flash` (or newer) in `.env`. |
 | `429 RESOURCE_EXHAUSTED` | Free-tier Gemini quota (20/day). Wait for reset or upgrade to paid tier. |
 | UI not reachable | Check `docker compose ps`; confirm Tailscale IP and port 8501. |
 | Webhook not deploying | Confirm secret matches GitHub; check `docker compose logs auto-deploy`. |

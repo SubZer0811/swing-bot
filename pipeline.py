@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from datetime import date
@@ -18,24 +19,66 @@ _run_lock = threading.Lock()
 _running = False
 
 
+def _log_step(run_id, phase: int, symbol: str, step: str, detail) -> None:
+    if run_id is None:
+        return
+    try:
+        text = detail if isinstance(detail, str) else json.dumps(detail, indent=2, default=str)
+        db.add_analysis_detail(run_id, phase, symbol, step, text)
+    except Exception as exc:
+        log.warning("Failed to persist analysis detail (%s): %s", step, exc)
+
+
 def _technical_analysis(client: UpstoxClient, symbol: str) -> dict:
     df = get_historical_data(client, symbol)
     return technicals.summarize(df)
 
 
-def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors: list) -> list:
+def _fundamentals_summary(client: UpstoxClient, symbol: str, max_chars: int = 4000) -> str:
+    try:
+        isin = client.isin_for(symbol)
+        sections = [
+            ("Key ratios", client.key_ratios(isin)),
+            ("Income statement", client.income_statement(isin)),
+        ]
+        lines = []
+        for label, payload in sections:
+            if not payload:
+                continue
+            if isinstance(payload, dict):
+                for k, v in payload.items():
+                    if isinstance(v, (dict, list)):
+                        v = json.dumps(v, default=str)
+                    lines.append(f"{label} · {k}: {v}")
+            else:
+                lines.append(f"{label}: {payload}")
+        return "\n".join(lines)[:max_chars]
+    except Exception as exc:
+        log.warning("Fundamentals failed for %s: %s", symbol, exc)
+        return ""
+
+
+def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors: list,
+                run_id: int = None) -> list:
     recs = []
     if not holdings:
         log.info("Phase 1: no holdings to analyze")
+        _log_step(run_id, 1, "", "phase", "No holdings to analyze.")
         return recs
+    _log_step(run_id, 1, "", "phase", f"Analyzing {len(holdings)} held stocks.")
     for holding in holdings:
         symbol = holding.ticker
         try:
             technical = _technical_analysis(client, symbol)
             if not technical:
                 log.warning("Phase 1: no technicals for %s, skipping", symbol)
+                _log_step(run_id, 1, symbol, "skipped", "No technicals available.")
                 continue
+            _log_step(run_id, 1, symbol, "technicals", technical)
             news = news_scraper.get_recent_news(symbol)
+            _log_step(run_id, 1, symbol, "news", news)
+            fundamentals = _fundamentals_summary(client, symbol)
+            _log_step(run_id, 1, symbol, "fundamentals", fundamentals or "No fundamentals data.")
             ltp = technical.get("close")
             context = {
                 "quantity": holding.quantity,
@@ -48,25 +91,29 @@ def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors
                 news,
                 budget=0.0,
                 holding_context=context,
+                fundamentals=fundamentals,
+                on_log=lambda step, detail, s=symbol: _log_step(run_id, 1, s, step, detail),
             )
-            recs.append(
-                {
-                    "ticker": symbol,
-                    "action": result.action,
-                    "confidence_score": result.confidence_score,
-                    "target_price": result.target_price,
-                    "stop_loss": result.stop_loss,
-                    "entry_price": ltp,
-                    "quantity": 0,
-                    "budget": 0.0,
-                    "rationale": result.rationale,
-                }
-            )
+            rec = {
+                "ticker": symbol,
+                "action": result.action,
+                "confidence_score": result.confidence_score,
+                "target_price": result.target_price,
+                "stop_loss": result.stop_loss,
+                "entry_price": ltp,
+                "quantity": 0,
+                "budget": 0.0,
+                "rationale": result.rationale,
+            }
+            recs.append(rec)
+            _log_step(run_id, 1, symbol, "result", rec)
         except QuotaExceededError as exc:
             errors.append(f"Gemini quota exceeded during Phase 1 ({symbol}): {exc}")
+            _log_step(run_id, 1, symbol, "error", f"Quota exceeded: {exc}")
             return recs
         except Exception as exc:
             errors.append(f"Phase 1 failed for {symbol}: {exc}")
+            _log_step(run_id, 1, symbol, "error", str(exc))
             log.exception("Phase 1 failed for %s: %s", symbol, exc)
     return recs
 
@@ -96,14 +143,18 @@ def _tech_score(tech: dict) -> float:
     return score
 
 
-def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors: list) -> list:
+def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors: list,
+                run_id: int = None):
     if budget <= 0:
         log.info("Phase 2: budget is 0, no BUY analysis")
-        return []
+        _log_step(run_id, 2, "", "phase", "Budget is 0 — no BUY analysis.")
+        return [], []
+    _log_step(run_id, 2, "", "phase", f"Phase 2 started (budget INR {budget:,.0f}).")
     try:
         universe_symbols = universe.get_nifty500()
     except Exception as exc:
         errors.append(f"Failed to load universe: {exc}")
+        _log_step(run_id, 2, "", "error", f"Failed to load universe: {exc}")
         log.exception("Failed to load universe: %s", exc)
         return [], []
     watchlist = db.get_watchlist()
@@ -111,13 +162,20 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
         watchlist = list(config.WATCHLIST)
     universe_symbols = list(dict.fromkeys(universe_symbols + watchlist))
     log.info("Phase 2: universe size (NIFTY 500 + watchlist): %d", len(universe_symbols))
+    _log_step(run_id, 2, "", "universe", universe_symbols)
     try:
         affordable = universe.filter_by_budget(client, universe_symbols, budget)
     except Exception as exc:
         errors.append(f"Failed to filter universe by budget: {exc}")
+        _log_step(run_id, 2, "", "error", f"Failed to filter universe by budget: {exc}")
         log.exception("Failed to filter universe by budget: %s", exc)
         return [], []
     log.info("Phase 2: %d stocks affordable within INR %.0f", len(affordable), budget)
+    _log_step(
+        run_id, 2, "", "affordable",
+        f"{len(affordable)} stocks within budget:\n"
+        + "\n".join(f"{a['symbol']} @ {a['ltp']}" for a in affordable),
+    )
 
     scored = []
     for item in affordable:
@@ -127,12 +185,13 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
             if technical:
                 scored.append({"symbol": symbol, "ltp": technical.get("close") or item["ltp"], "tech": technical})
         except Exception as exc:
+            _log_step(run_id, 2, symbol, "error", f"Technicals failed: {exc}")
             log.warning("Technicals failed for %s: %s", symbol, exc)
     scored.sort(key=lambda x: _tech_score(x["tech"]), reverse=True)
     shortlist = scored[: config.PHASE2_TOP_N]
     log.info("Phase 2: shortlisted top %d by technical score", len(shortlist))
 
-    shortlist_meta = [
+    scored_meta = [
         {
             "symbol": item["symbol"],
             "ltp": item["ltp"],
@@ -143,37 +202,54 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
             "marubozu": item["tech"].get("marubozu"),
             "doji": item["tech"].get("doji"),
         }
-        for item in shortlist
+        for item in scored
     ]
+    _log_step(run_id, 2, "", "scored", scored_meta)
+
+    shortlist_meta = scored_meta[: config.PHASE2_TOP_N]
+    _log_step(run_id, 2, "", "shortlist", shortlist_meta)
+    _log_step(run_id, 2, "", "phase", f"Shortlisted top {len(shortlist)} by technical score.")
 
     recs = []
     for item in shortlist:
         symbol = item["symbol"]
         ltp = item["ltp"]
         try:
+            _log_step(run_id, 2, symbol, "technicals", item["tech"])
             news = news_scraper.get_recent_news(symbol)
+            _log_step(run_id, 2, symbol, "news", news)
+            fundamentals = _fundamentals_summary(client, symbol)
+            _log_step(run_id, 2, symbol, "fundamentals", fundamentals or "No fundamentals data.")
             qty = int(budget // ltp) if ltp else 0
             result = agent.analyze_stock(
-                symbol, item["tech"], news, budget=budget, holding_context=None
+                symbol,
+                item["tech"],
+                news,
+                budget=budget,
+                holding_context=None,
+                fundamentals=fundamentals,
+                on_log=lambda step, detail, s=symbol: _log_step(run_id, 2, s, step, detail),
             )
-            recs.append(
-                {
-                    "ticker": symbol,
-                    "action": result.action,
-                    "confidence_score": result.confidence_score,
-                    "target_price": result.target_price,
-                    "stop_loss": result.stop_loss,
-                    "entry_price": ltp,
-                    "quantity": qty if result.action == "BUY" else 0,
-                    "budget": budget,
-                    "rationale": result.rationale,
-                }
-            )
+            rec = {
+                "ticker": symbol,
+                "action": result.action,
+                "confidence_score": result.confidence_score,
+                "target_price": result.target_price,
+                "stop_loss": result.stop_loss,
+                "entry_price": ltp,
+                "quantity": qty if result.action == "BUY" else 0,
+                "budget": budget,
+                "rationale": result.rationale,
+            }
+            recs.append(rec)
+            _log_step(run_id, 2, symbol, "result", rec)
         except QuotaExceededError as exc:
             errors.append(f"Gemini quota exceeded during Phase 2 ({symbol}): {exc}")
+            _log_step(run_id, 2, symbol, "error", f"Quota exceeded: {exc}")
             return recs, shortlist_meta
         except Exception as exc:
             errors.append(f"Phase 2 failed for {symbol}: {exc}")
+            _log_step(run_id, 2, symbol, "error", str(exc))
             log.exception("Phase 2 failed for %s: %s", symbol, exc)
     return recs, shortlist_meta
 
@@ -184,12 +260,15 @@ def run_daily_analysis(run_id: int = None, shortlist: list = None) -> dict:
     client.load_instrument_master()
     agent = GeminiAgent()
 
+    if run_id is None:
+        run_id = db.create_analysis_run(db.get_budget())
+
     holdings = db.get_holdings()
     budget = db.get_budget()
     errors = []
 
-    phase1 = _run_phase1(client, agent, holdings, errors)
-    phase2, shortlist_meta = _run_phase2(client, agent, budget, errors)
+    phase1 = _run_phase1(client, agent, holdings, errors, run_id)
+    phase2, shortlist_meta = _run_phase2(client, agent, budget, errors, run_id)
     if shortlist is not None:
         shortlist.extend(shortlist_meta)
 
@@ -209,8 +288,7 @@ def run_daily_analysis(run_id: int = None, shortlist: list = None) -> dict:
         "errors": errors,
         "shortlist": shortlist_meta,
     }
-    if run_id is not None:
-        db.complete_analysis_run(run_id, len(phase1), len(phase2), shortlist_meta, errors)
+    db.complete_analysis_run(run_id, len(phase1), len(phase2), shortlist_meta, errors)
     return result
 
 

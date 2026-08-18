@@ -10,8 +10,7 @@ services:
     environment:
       - TZ=Asia/Kolkata
     volumes:
-      - ./data:/app/data
-    tz: "Asia/Kolkata"
+      - ./:/app
 
   auto-deploy:
     image: almir/webhook
