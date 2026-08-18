@@ -103,6 +103,8 @@ def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors
                 "entry_price": ltp,
                 "quantity": 0,
                 "budget": 0.0,
+                "holding_period_days": result.holding_period_days,
+                "exit_plan": result.exit_plan,
                 "rationale": result.rationale,
             }
             recs.append(rec)
@@ -239,6 +241,8 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
                 "entry_price": ltp,
                 "quantity": qty if result.action == "BUY" else 0,
                 "budget": budget,
+                "holding_period_days": result.holding_period_days,
+                "exit_plan": result.exit_plan,
                 "rationale": result.rationale,
             }
             recs.append(rec)

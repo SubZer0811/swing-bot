@@ -3,6 +3,7 @@ import logging
 from datetime import date, datetime
 from sqlalchemy import create_engine, Column, Integer, String, Date, Float, Text, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import text
 
 import config
 
@@ -30,6 +31,8 @@ class Recommendation(Base):
     quantity = Column(Integer)
     budget = Column(Float)
     rationale = Column(Text)
+    holding_period_days = Column(Integer, nullable=True)
+    exit_plan = Column(Text, nullable=True)
     status = Column(String, default="Pending")
 
 
@@ -85,6 +88,24 @@ class AnalysisDetail(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate_recommendations()
+
+
+_RECOMMENDATION_MIGRATIONS = [
+    ("holding_period_days", "INTEGER"),
+    ("exit_plan", "TEXT"),
+]
+
+
+def _migrate_recommendations() -> None:
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(recommendations)"))}
+        for name, coltype in _RECOMMENDATION_MIGRATIONS:
+            if name not in cols:
+                conn.execute(
+                    text(f"ALTER TABLE recommendations ADD COLUMN {name} {coltype}")
+                )
+                log.info("Migrated recommendations: added column %s", name)
 
 
 def _session():
@@ -106,6 +127,8 @@ def save_recommendations(recs: list) -> None:
                     quantity=rec.get("quantity"),
                     budget=rec.get("budget"),
                     rationale=rec.get("rationale", ""),
+                    holding_period_days=rec.get("holding_period_days"),
+                    exit_plan=rec.get("exit_plan"),
                     status="Pending",
                 )
             )

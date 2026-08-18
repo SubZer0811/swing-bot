@@ -60,6 +60,8 @@ def _recommendation_df(recs) -> pd.DataFrame:
             "Entry": r.entry_price,
             "Qty": r.quantity,
             "Budget": r.budget,
+            "Exit Days": r.holding_period_days,
+            "Exit Plan": r.exit_plan,
             "Status": r.status,
         }
         for r in recs
@@ -240,6 +242,10 @@ def _render_today() -> None:
             c3.metric("Stop Loss", r.stop_loss)
             c4.metric("Qty", r.quantity)
             st.write(f"**Budget basis:** ₹{r.budget:,.0f}" if r.budget else "**Budget basis:** n/a")
+            if r.holding_period_days:
+                st.write(f"**Expected exit:** ~{r.holding_period_days} days")
+            if r.exit_plan:
+                st.write(f"**Exit plan:** {r.exit_plan}")
             st.write(r.rationale)
             a, b = st.columns(2)
             if a.button("Mark Executed", key=f"exe_{r.id}"):

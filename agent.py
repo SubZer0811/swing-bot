@@ -23,6 +23,16 @@ class StockRecommendation(BaseModel):
     target_price: float
     stop_loss: float
     quantity: int = Field(default=0, description="shares to buy given budget")
+    holding_period_days: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="predicted days to hold before selling to capture the swing move",
+    )
+    exit_plan: str = Field(
+        default="",
+        description="when and how to exit: target reached, stop-loss hit, time-based exit, or momentum exhaustion",
+    )
     rationale: str
 
 
@@ -35,6 +45,15 @@ Return a strict JSON object matching the schema. For BUY, quantity is the
 number of shares that fit within the available budget (floor of
 budget / entry price). For SELL or HOLD, quantity may be 0.
 Be conservative; do not invent prices. Use the provided data only.
+
+For every recommendation, predict holding_period_days: the expected number of
+days to hold before selling to capture the swing profit, aligned with the
+5-10 day horizon. In exit_plan, state the concrete exit trigger: the first
+condition among (a) target price reached, (b) stop loss hit, (c) time-based
+exit after holding_period_days, or (d) momentum exhaustion. Justify your
+timing from the indicators (distance to target, RSI levels, support
+breakdown). For SELL/HOLD of an existing position, exit_plan describes when
+to exit the position in full.
 """
 
 
