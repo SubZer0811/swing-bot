@@ -186,6 +186,42 @@ def _render_analysis_log() -> None:
                 f"Phase 1 (portfolio): **{run.phase1_count}** · "
                 f"Phase 2 (BUY): **{run.phase2_count}** · logged events: **{len(details)}**"
             )
+            try:
+                shortlist = json.loads(run.shortlist or "[]")
+            except Exception:
+                shortlist = []
+            try:
+                run_errors = json.loads(run.errors or "[]")
+            except Exception:
+                run_errors = []
+            log_payload = {
+                "run_id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "status": run.status,
+                "budget": run.budget,
+                "phase1_count": run.phase1_count,
+                "phase2_count": run.phase2_count,
+                "shortlist": shortlist,
+                "errors": run_errors,
+                "events": [
+                    {
+                        "phase": d.phase,
+                        "symbol": d.symbol,
+                        "step": d.step,
+                        "detail": d.detail,
+                        "created_at": d.created_at.isoformat() if d.created_at else None,
+                    }
+                    for d in details
+                ],
+            }
+            st.download_button(
+                "Download run log as JSON",
+                data=json.dumps(log_payload, indent=2, default=str),
+                file_name=f"analysis_run_{run.id}_{run.started_at:%Y%m%d_%H%M}.json",
+                mime="application/json",
+                key=f"dl_run_{run.id}",
+            )
             if not details:
                 st.info("No detail records for this run.")
                 continue
