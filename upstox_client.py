@@ -36,7 +36,7 @@ class UpstoxClient:
         self._isin_to_key = {}
 
     def _get(self, url: str) -> dict:
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 resp = self.session.get(url)
                 if resp.status_code == 401:
@@ -44,15 +44,19 @@ class UpstoxClient:
                         "Unauthorized: UPSTOX_ANALYTICS_TOKEN is invalid or expired"
                     )
                 if resp.status_code == 429:
-                    log.warning("Rate limited, backing off...")
-                    time.sleep(5)
+                    delay = 10 * (attempt + 1)
+                    log.warning("Rate limited by Upstox, backing off %ss", delay)
+                    time.sleep(delay)
+                    if attempt == 3:
+                        raise UpstoxError(f"Rate limited (429) fetching {url}")
                     continue
                 resp.raise_for_status()
                 return resp.json()
             except requests.RequestException:
-                if attempt == 2:
+                if attempt == 3:
                     raise UpstoxError(f"Failed to fetch {url}: {resp.status_code}")
                 time.sleep(2)
+            time.sleep(0.15)
         raise UpstoxError(f"Failed to fetch {url}")
 
     def load_instrument_master(self, force: bool = False) -> None:

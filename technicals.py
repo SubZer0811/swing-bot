@@ -82,12 +82,11 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         log.warning("Not enough rows for indicators (%d)", len(df))
         return df
     df = df.copy()
-    if HAS_PANDAS_TA:
-        try:
-            return _apply_pandas_ta(df)
-        except Exception as exc:
-            log.warning("pandas-ta failed, using fallback: %s", exc)
-    return _apply_fallback(df)
+    try:
+        return _apply_fallback(df)
+    except Exception as exc:
+        log.warning("Indication computation failed, returning raw df: %s", exc)
+        return df
 
 
 def pattern_label(value) -> str:

@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -81,13 +81,17 @@ def _run_and_report() -> bool:
     return True
 
 
+def _local(dt):
+    return (dt + timedelta(hours=5, minutes=30)) if dt else dt
+
+
 def _show_run_status() -> None:
     last = db.get_last_run()
     if not last:
         return
     if last.status == "Running":
         st.info(
-            f"An analysis run is currently in progress (started {last.started_at:%H:%M}). "
+            f"An analysis run is currently in progress (started {_local(last.started_at):%H:%M}). "
             "Refresh this page to see the latest results."
         )
     else:
@@ -104,7 +108,7 @@ def _show_run_status() -> None:
                     st.warning(err)
         else:
             st.success(
-                f"Last run ({last.started_at:%H:%M}) → {last.phase1_count} portfolio + "
+                f"Last run ({_local(last.started_at):%H:%M}) → {last.phase1_count} portfolio + "
                 f"{last.phase2_count} BUY recommendations."
             )
 
@@ -175,7 +179,7 @@ def _render_analysis_log() -> None:
     for run in runs:
         details = db.get_run_details(run.id)
         with st.expander(
-            f"Run #{run.id} · {run.started_at:%Y-%m-%d %H:%M} · "
+            f"Run #{run.id} · {_local(run.started_at):%Y-%m-%d %H:%M} · "
             f"budget ₹{run.budget:,.0f} · {run.status}"
         ):
             st.write(
