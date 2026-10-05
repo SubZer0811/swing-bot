@@ -282,6 +282,13 @@ def _render_today() -> None:
             c3.metric("Stop Loss", r.stop_loss)
             c4.metric("Qty", r.quantity)
             st.write(f"**Budget basis:** ₹{r.budget:,.0f}" if r.budget else "**Budget basis:** n/a")
+            if r.quantity and r.entry_price and r.target_price and r.stop_loss and r.entry_price > 0:
+                profit_pct = (r.target_price - r.entry_price) / r.entry_price * 100
+                loss_pct = (r.entry_price - r.stop_loss) / r.entry_price * 100
+                st.write(
+                    f"**Projected profit if target hits:** {profit_pct:.1f}% · "
+                    f"**Projected loss if stop-loss hits:** {loss_pct:.1f}%"
+                )
             if r.holding_period_days:
                 st.write(f"**Expected exit:** ~{r.holding_period_days} days")
             if r.exit_plan:
