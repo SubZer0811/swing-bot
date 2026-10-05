@@ -62,6 +62,8 @@ def _recommendation_df(recs) -> pd.DataFrame:
             "Budget": r.budget,
             "Exit Days": r.holding_period_days,
             "Exit Plan": r.exit_plan,
+            "Profit %": round((r.target_price - r.entry_price) / r.entry_price * 100, 1) if (r.target_price is not None and r.entry_price and r.entry_price > 0) else None,
+            "Loss %": round((r.entry_price - r.stop_loss) / r.entry_price * 100, 1) if (r.stop_loss is not None and r.entry_price and r.entry_price > 0) else None,
             "Status": r.status,
         }
         for r in recs
