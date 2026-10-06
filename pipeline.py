@@ -59,7 +59,7 @@ def _fundamentals_summary(client: UpstoxClient, symbol: str, max_chars: int = 40
 
 
 def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors: list,
-                run_id: int = None) -> list:
+                run_id: int = None, already_done: set = None) -> list:
     recs = []
     if not holdings:
         log.info("Phase 1: no holdings to analyze")
@@ -68,6 +68,9 @@ def _run_phase1(client: UpstoxClient, agent: GeminiAgent, holdings: list, errors
     _log_step(run_id, 1, "", "phase", f"Analyzing {len(holdings)} held stocks.")
     for holding in holdings:
         symbol = holding.ticker
+        if already_done and symbol in already_done:
+            _log_step(run_id, 1, symbol, "skipped", "Already evaluated on this run — resume skips it.")
+            continue
         try:
             technical = _technical_analysis(client, symbol)
             if not technical:
@@ -146,7 +149,7 @@ def _tech_score(tech: dict) -> float:
 
 
 def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors: list,
-                run_id: int = None):
+                run_id: int = None, already_done: set = None):
     if budget <= 0:
         log.info("Phase 2: budget is 0, no BUY analysis")
         _log_step(run_id, 2, "", "phase", "Budget is 0 — no BUY analysis.")
@@ -215,6 +218,9 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
     recs = []
     for item in shortlist:
         symbol = item["symbol"]
+        if already_done and symbol in already_done:
+            _log_step(run_id, 2, symbol, "skipped", "Already evaluated on this run — resume skips it.")
+            continue
         ltp = item["ltp"]
         try:
             _log_step(run_id, 2, symbol, "technicals", item["tech"])
@@ -258,7 +264,7 @@ def _run_phase2(client: UpstoxClient, agent: GeminiAgent, budget: float, errors:
     return recs, shortlist_meta
 
 
-def run_daily_analysis(run_id: int = None, shortlist: list = None) -> dict:
+def run_daily_analysis(run_id: int = None, shortlist: list = None, resume: bool = False) -> dict:
     db.init_db()
     client = UpstoxClient()
     client.load_instrument_master()
@@ -266,13 +272,21 @@ def run_daily_analysis(run_id: int = None, shortlist: list = None) -> dict:
 
     if run_id is None:
         run_id = db.create_analysis_run(db.get_budget())
+    elif resume:
+        try:
+            db.set_run_status(run_id, "Running")
+        except Exception as exc:
+            log.warning("Failed to mark run %s Running: %s", run_id, exc)
 
     holdings = db.get_holdings()
     budget = db.get_budget()
     errors = []
 
-    phase1 = _run_phase1(client, agent, holdings, errors, run_id)
-    phase2, shortlist_meta = _run_phase2(client, agent, budget, errors, run_id)
+    carried1 = db.get_successful_symbols(run_id, 1) if resume else set()
+    carried2 = db.get_successful_symbols(run_id, 2) if resume else set()
+
+    phase1 = _run_phase1(client, agent, holdings, errors, run_id, already_done=carried1)
+    phase2, shortlist_meta = _run_phase2(client, agent, budget, errors, run_id, already_done=carried2)
     if shortlist is not None:
         shortlist.extend(shortlist_meta)
 
@@ -280,19 +294,20 @@ def run_daily_analysis(run_id: int = None, shortlist: list = None) -> dict:
     if all_recs:
         db.save_recommendations(all_recs)
         log.info("Saved %d recommendations", len(all_recs))
-    else:
-        log.info("No recommendations generated today")
+
+    phase1_total = len(carried1) + len(phase1)
+    phase2_total = len(carried2) + len(phase2)
 
     result = {
         "date": date.today().isoformat(),
-        "phase1_count": len(phase1),
-        "phase2_count": len(phase2),
+        "phase1_count": phase1_total,
+        "phase2_count": phase2_total,
         "budget": budget,
         "holdings_count": len(holdings),
         "errors": errors,
         "shortlist": shortlist_meta,
     }
-    db.complete_analysis_run(run_id, len(phase1), len(phase2), shortlist_meta, errors)
+    db.complete_analysis_run(run_id, phase1_total, phase2_total, shortlist_meta, errors)
     return result
 
 
@@ -321,6 +336,30 @@ def _run_in_background(run_id: int) -> None:
         run_daily_analysis(run_id=run_id)
     except Exception as exc:
         log.exception("Background analysis failed: %s", exc)
+        db.complete_analysis_run(run_id, 0, 0, [], [str(exc)])
+    finally:
+        _running = False
+        _run_lock.release()
+
+
+def start_async_resume(run_id: int) -> bool:
+    global _running
+    if not _run_lock.acquire(blocking=False):
+        return False
+    if _running:
+        _run_lock.release()
+        return False
+    _running = True
+    threading.Thread(target=_run_in_background_resume, args=(run_id,), daemon=True).start()
+    return True
+
+
+def _run_in_background_resume(run_id: int) -> None:
+    global _running
+    try:
+        run_daily_analysis(run_id=run_id, resume=True)
+    except Exception as exc:
+        log.exception("Background resume failed: %s", exc)
         db.complete_analysis_run(run_id, 0, 0, [], [str(exc)])
     finally:
         _running = False

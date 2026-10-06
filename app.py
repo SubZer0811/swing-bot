@@ -224,6 +224,13 @@ def _render_analysis_log() -> None:
                 mime="application/json",
                 key=f"dl_run_{run.id}",
             )
+            if run.status == "Incomplete":
+                if st.button("Resume this analysis (fill in missing stocks)", key=f"resume_{run.id}"):
+                    started = pipeline.start_async_resume(run.id)
+                    if started:
+                        st.success("Resume started in the background — refresh in a minute.")
+                    else:
+                        st.warning("An analysis is already running in the background.")
             if not details:
                 st.info("No detail records for this run.")
                 continue

@@ -224,7 +224,7 @@ def complete_analysis_run(run_id: int, phase1: int, phase2: int,
         run = session.query(AnalysisRun).get(run_id)
         if run:
             run.finished_at = datetime.utcnow()
-            run.status = "Completed" if not errors else "Completed (with errors)"
+            run.status = "Completed" if not errors else "Incomplete"
             run.phase1_count = phase1
             run.phase2_count = phase2
             run.shortlist = json.dumps(shortlist)
@@ -269,3 +269,25 @@ def get_run_details(run_id: int) -> list:
             .order_by(AnalysisDetail.id.asc())
             .all()
         )
+
+
+def get_successful_symbols(run_id: int, phase: int) -> set:
+    with _session() as session:
+        rows = (
+            session.query(AnalysisDetail)
+            .filter(
+                AnalysisDetail.run_id == run_id,
+                AnalysisDetail.phase == phase,
+                AnalysisDetail.step == "result",
+            )
+            .all()
+        )
+        return {r.symbol for r in rows if r.symbol}
+
+
+def set_run_status(run_id: int, status: str) -> None:
+    with _session() as session:
+        run = session.query(AnalysisRun).get(run_id)
+        if run:
+            run.status = status
+            session.commit()
